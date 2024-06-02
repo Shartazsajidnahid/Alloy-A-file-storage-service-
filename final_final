@@ -1,0 +1,226 @@
+open util/ordering[Time] as time
+open util/ordering[Data] as data
+
+module FileStorageService
+
+abstract sig Username {}
+sig Client, Guest extends Username{}
+
+abstract sig FileID {}
+sig assignedID, notassignedID extends FileID{}
+
+sig Time {}
+sig Data {}
+
+sig Stringg{
+	length: one Int,
+	datapointer: set Data
+}
+
+sig File {
+    username: one Client,
+    fileID: one assignedID,
+    content: lone Stringg,
+    createTime: one Time,
+    updateTime: one Time,
+    expiryTime: one Time
+}
+
+sig FileStorageService {
+    file: set File,
+    fileID: set FileID,
+    userName: set Username,
+	capacity: one Int
+}
+
+
+//checks
+
+pred FileExists [fileStorage: FileStorageService, id: FileID] {
+	one f: fileStorage.file | f.fileID = id
+}
+
+pred FileNotExist [fileStorage: FileStorageService, id: FileID] {
+	no f: fileStorage.file | f.fileID = id
+}
+
+pred SpaceAvailable [fileStorage: FileStorageService, len: Int] {
+	fileStorage.capacity >= len
+} 
+
+pred isOwner [fs : FileStorageService, id: FileID, user: Client] {
+	one f: fs.file | f.fileID = id and f.username = user
+}
+
+pred isNotOwner [fs : FileStorageService, id: FileID, user: Client] {
+	no f: fs.file | f.fileID = id and f.username = user
+}
+
+pred NotKnownUser [user: Username] {
+	user in Guest
+}
+
+pred IsKnownUser [user: Username] {
+	user in Client
+}
+
+
+
+//Basic Operations
+
+pred CreateNewFile [fs,fs": FileStorageService, newfile: File, newusername: Client, 
+	newfileID: assignedID, newcreateTime: Time, newexpiryTime: Time] {
+	
+	// Create a new file with the given attributes
+	newfile.fileID = newfileID
+   	newfile.username =  newusername
+	newfile.createTime = newcreateTime
+	newfile.expiryTime = newexpiryTime
+    
+	//add new file to the StorageService
+    fs".file = fs.file + newfile
+	
+	//send report
+	//return successReport
+}
+
+pred WriteToFile[fs, fs": FileStorageService, fil, fil": File, data : Stringg, 
+	fileID": assignedID, updateTime": Time, username": Client] {
+    
+	//check if file exists
+	FileExists [ fs , fileID" ]
+
+	//check space availability
+	SpaceAvailable [fs,data.length]
+
+	// update new file
+	fil".fileID = fileID"
+	fil".createTime = updateTime"
+	fil".updateTime = updateTime"
+	fil".expiryTime = fil.expiryTime
+	fil".username =  username"
+
+ 	fil".content = fil.content + data
+	fs".capacity = fs.capacity - data.length
+	
+	//add new edited file to the StorageService
+	fs".file = fs.file + fil"
+
+}
+
+//run WriteToFile for 2
+
+
+pred DestroyFile[fs, fs": FileStorageService, id: FileID, user: Username ] {
+	
+	//check if file exists
+	FileExists [ fs , id ]
+	
+	//check owner 
+	isOwner [ fs, id, user ]
+
+    // Remove the file from the storage service 
+	// and increase capacity
+
+	one f: fs.file | f.fileID = id implies 
+		{
+			fs".file = fs.file - f 
+			fs".capacity = fs.capacity + f.content.length 
+		}
+}
+
+fun ReadFile[fs: FileStorageService, id: FileID] : set File {
+  { f: File | f in fs.file and f.fileID = id}
+}
+//
+//fun ReadFile[fs: FileStorageService, id: FileID] : one Stringg {
+//  { datas: Stringg | f: File |  f in fs.file and f.fileID = id implies f.content}
+//}
+
+//run ReadFile for 2
+
+pred SetFileLength[fs, fs": FileStorageService, fil, fil": File, 
+	fileID": assignedID, len: Int, updateTime": Time, username": Client] {
+	
+	//check if file exists
+	FileExists [ fs , fileID" ]
+
+	// update new file
+	fil".fileID = fileID"
+	fil".createTime = updateTime"
+	fil".updateTime = updateTime"
+	fil".expiryTime = fil.expiryTime
+	fil".username =  username"
+
+	//update length
+ 	fil".content.length = len
+	
+	//add new edited file to the StorageService
+	fs".file = fs.file + fil"
+} 
+//run SetFileLength for 2
+
+pred SetFileExpiry[fs, fs": FileStorageService, fil, fil": File, fileID": assignedID, len: Int, updateTime": Time, 
+	newexpiryTime: Time, username": Client] {
+	
+	//check if file exists
+	FileExists [ fs , fileID" ]
+
+	// update new file
+	fil".fileID = fileID"
+	fil".createTime = updateTime"
+	fil".updateTime = updateTime"
+	fil".username =  username"
+
+	//update length
+ 	fil".expiryTime = newexpiryTime
+	
+	//add new edited file to the StorageService
+	fs".file = fs.file + fil"
+} 
+
+pred ScavengeFile [fs, fs": FileStorageService, currentTime: Time]{
+	some filestoscav:File | filestoscav in fs.file and 
+				currentTime in *time/next[ filestoscav.expiryTime] 
+				implies	fs".file = fs.file - filestoscav
+}
+
+
+//Facts
+
+fact oneFileoneID{
+    // Each file has a unique fileID
+    all f1, f2: File | f1 != f2 => f1.fileID != f2.fileID
+}
+
+fact oneFileoneClient{
+    // Each file is associated with exactly one username
+    all f: File | one user: Client | f.username = user
+}
+
+pred comesBefore [t1, t2: Time] {
+	//t2 should be any of the states next to t1
+    t1 != t2 and t2 in *time/next[t1]
+}
+
+fact createLTexpiry {
+	all f: File | (comesBefore[ f.createTime, f.expiryTime ]) 
+   // all t1, t2: Time | t1 != t2 implies (comesBefore[t1, t2])
+}
+
+fact lengthGTEzero{
+	all s: Stringg | s.length >= 0
+}
+
+fact capacityGTEzero{
+	all fs: FileStorageService | fs.capacity >= 0
+}
+
+--  assertion to check if the comesBefore predicate works correctly
+//assert TestComesBefore {
+//	all f: File | (comesBefore[ f.createTime, f.expiryTime]) 
+//   // all t1, t2: Time | t1 != t2 implies (comesBefore[t1, t2])
+//}
+//check TestComesBefore for 3 
+
+run {} for 2
